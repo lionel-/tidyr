@@ -114,53 +114,31 @@ vec_lengthen <- function(x, ptype = NULL) {
     return(out)
   }
 
-  seq_len_n <- seq_len(n)
-  seq_len_size <- seq_len(size)
-
-  sizes <- rep_len(NA_integer_, size)
-
-  for (i in seq_len_n) {
-    col <- x[[i]]
-
-    for (j in seq_len_size) {
-      # TODO: col[[j]] -> vec_slice2(col, j)
-      sizes[[j]] <- update_size(sizes[[j]], col[[j]])
-    }
+  if (length(x) > 1) {
+    # Only keep NULL if multiple columns are involved. Doesn't seem
+    # consistent? Changing this breaks `unnest()` but can probably be
+    # worked around. --- Interestingly placing this line inside the
+    # transposed map kills the performance.
+    x <- map(x, map_if, is.null, ~ NA)
+    x <- transpose(map(transpose(x), ~ vec_recycle_common(!!!.)))
   }
-
-  sizes <- map_int(sizes, finalise_size)
-
-  names <- names(x)
+  sizes <- map_int(x[[1]], vec_size)
 
   has_ptype <- !is.null(ptype)
   if (has_ptype && !is.data.frame(ptype)) {
     abort("`ptype` must be a data frame")
   }
 
-  cols <- vector("list", n)
-  names(cols) <- names
-
-  pieces <- vector("list", size)
-
-  for (i in seq_len_n) {
-    col <- x[[i]]
-
-    for (j in seq_len_size) {
-      # TODO: col[[j]] -> vec_slice2(col, j)
-      pieces[[j]] <- tidyr_recycle(col[[j]], sizes[[j]])
-    }
-
-    if (has_ptype) {
-      col_ptype <- ptype[[names[[i]]]]
-    } else {
-      col_ptype <- NULL
-    }
-
-    cols[[i]] <- vec_c(!!!pieces, .ptype = col_ptype)
+  if (has_ptype) {
+    cols <- map2(x, names(x), ~ {
+      vec_c(!!!.x, .ptype = ptype[[.y]])
+    })
+  } else {
+    cols <- map(x, ~ vec_c(!!!.))
   }
 
   out_size <- sum(sizes)
-  loc <- rep(seq_len_size, sizes)
+  loc <- rep(seq_len(size), sizes)
 
   new_lengthen_df(loc, cols, out_size, ptype)
 }
