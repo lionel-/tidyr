@@ -114,14 +114,42 @@ vec_lengthen <- function(x, ptype = NULL) {
     return(out)
   }
 
+  empty <- int()
+
   if (length(x) > 1) {
-    # Only keep NULL if multiple columns are involved. Doesn't seem
-    # consistent? Changing this breaks `unnest()` but can probably be
-    # worked around. --- Interestingly placing this line inside the
-    # transposed map kills the performance.
-    x <- map(x, map_if, is.null, ~ NA)
-    x <- transpose(map(transpose(x), ~ vec_recycle_common(!!!.)))
+    x <- transpose(x)
+
+    # Use loops instead of map for efficiency because we're looping in
+    # the direction of rows
+    for (i in seq_along(x)) {
+      row <- x[[i]]
+      any_null <- FALSE
+      all_null <- TRUE
+      for (j in seq_along(row)) {
+        if (is.null(row[[j]])) {
+          row[[j]] <- NA
+          any_null <- TRUE
+        } else {
+          all_null <- FALSE
+        }
+      }
+      if (all_null) {
+        empty <- c(empty, i)
+      } else if (any_null) {
+        x[[i]] <- row
+      }
+    }
+    if (length(empty)) {
+      x <- x[-empty]
+    }
+
+    x <- transpose(map(x, ~ vec_recycle_common(!!!.)))
   }
+
+  if (!length(x)) {
+    stop("internal error")
+  }
+
   sizes <- map_int(x[[1]], vec_size)
 
   has_ptype <- !is.null(ptype)
@@ -138,7 +166,11 @@ vec_lengthen <- function(x, ptype = NULL) {
   }
 
   out_size <- sum(sizes)
-  loc <- rep(seq_len(size), sizes)
+  seq_len_size <- seq_len(size)
+  if (length(empty)) {
+    seq_len_size <- seq_len_size[-empty]
+  }
+  loc <- rep(seq_len_size, sizes)
 
   new_lengthen_df(loc, cols, out_size, ptype)
 }
@@ -216,4 +248,3 @@ init_col <- function(x) {
     x
   }
 }
-
